@@ -1,1 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>360° Water Dispenser - Advanced Prototype</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0f172a;
+            color: white;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .header {
+            padding: 25px 35px;
+            background: linear-gradient(180deg, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0) 100%);
+        }
+        h1 {
+            margin: 0 0 8px 0;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: #38bdf8;
+            text-shadow: 0 2px 10px rgba(56, 189, 248, 0.3);
+        }
+        p.subtitle {
+            margin: 0;
+            font-size: 15px;
+            color: #94a3b8;
+        }
+        
+        .dashboard {
+            position: absolute;
+            top: 25px;
+            right: 35px;
+            background: rgba(30, 41, 59, 0.85);
+            padding: 20px;
+            border-radius: 16px;
+            border: 1px solid #334155;
+            backdrop-filter: blur(10px);
+            width: 240px;
+            pointer-events: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .dash-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #94a3b8;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .stat-value { font-weight: bold; color: #f8fafc; }
+        
+        .progress-bg {
+            width: 100%;
+            height: 8px;
+            background: #0f172a;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #38bdf8;
+            width: 100%;
+            transition: width 0.1s linear, background-color 0.3s;
+        }
+        
+        .btn-refill {
+            width: 100%;
+            padding: 10px;
+            background: #0284c7;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-refill:hover { background: #0369a1; }
+        .btn-refill:active { transform: scale(0.98); }
 
+        .instructions {
+            position: absolute;
+            bottom: 35px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(30, 41, 59, 0.85);
+            padding: 15px 30px;
+            border-radius: 40px;
+            border: 1px solid #334155;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .icon-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            color: #cbd5e1;
+        }
+        .icon {
+            width: 28px;
+            height: 28px;
+            background: #0f172a;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #38bdf8;
+            border: 1px solid #475569;
+        }
+    </style>
+    <!-- Include Three.js and OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        <div class="header">
+            <h1>HydroHub 360°</h1>
+            <p class="subtitle">Next-Gen Dispenser Prototype</p>
+        </div>
+
+        <div class="dashboard">
+            <div class="dash-title">System Status</div>
+            
+            <div class="stat-row">
+                <span>Water Level</span>
+                <span class="stat-value" id="tank-percent">100%</span>
+            </div>
+            <div class="progress-bg">
+                <div class="progress-fill" id="tank-bar"></div>
+            </div>
+            
+            <div class="stat-row">
+                <span>Active Taps</span>
+                <span class="stat-value" id="active-taps-ui">0 / 3</span>
+            </div>
+            
+            <button class="btn-refill" onclick="forceRefill()">Instant Refill Tank</button>
+        </div>
+
+        <div class="instructions">
+            <div class="icon-box">
+                <div class="icon">👆</div>
+                <span>Click Tap Buttons to Fill</span>
+            </div>
+            <div style="width: 1px; height: 24px; background: #475569;"></div>
+            <div class="icon-box">
+                <div class="icon">🔄</div>
+                <span>Drag to Rotate</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- SCENE SETUP ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0f172a, 0.05);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        // Position camera to look at a human-scale height (waist/chest level)
+        camera.position.set(3, 1.8, 4);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.01; // Don't go below ground
+        controls.minDistance = 2;
+        controls.maxDistance = 10;
+        controls.target.set(0, 1.0, 0); // Focus on the dispensing area
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 4);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        const blueFillLight = new THREE.DirectionalLight(0x38bdf8, 0.5);
+        blueFillLight.position.set(-5, 3, -5);
+        scene.add(blueFillLight);
+
+        // --- MATERIALS ---
+        const floorMat = new THREE.MeshStandardMaterial({ 
+            color: 0x1e293b, roughness: 0.8, metalness: 0.2 
+        });
+        
+        const cabinetMat = new THREE.MeshStandardMaterial({ 
+            color: 0x111827, roughness: 0.6, metalness: 0.3
+        });
+
+        const innerWallMat = new THREE.MeshStandardMaterial({
+            color: 0xe2e8f0, roughness: 0.3, metalness: 0.1
+        });
+
+        const glassMat = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff, metalness: 0.1, roughness: 0.15,
+            transmission: 0.8, thickness: 0.1, transparent: true, opacity: 0.9
+        });
+
+        const metalMat = new THREE.MeshStandardMaterial({
+            color: 0x94a3b8, metalness: 0.9, roughness: 0.2
+        });
+
+        const waterMat = new THREE.MeshPhysicalMaterial({
+            color: 0x0ea5e9, metalness: 0.1, roughness: 0.1,
+            transmission: 0.9, transparent: true, opacity: 0.8,
+            emissive: 0x0284c7, emissiveIntensity: 0.4
+        });
+
+        const streamMat = new THREE.MeshBasicMaterial({
+            color: 0x7dd3fc, transparent: true, opacity: 0.0,
+            blending: THREE.AdditiveBlending
+        });
+
+        const buttonIdleMat = new THREE.MeshStandardMaterial({
+            color: 0x333333, emissive: 0x111111, roughness: 0.4, metalness: 0.8
+        });
+
+        const buttonActiveMat = new THREE.MeshStandardMaterial({
+            color: 0x38bdf8, emissive: 0x0ea5e9, emissiveIntensity: 1.0, roughness: 0.2, metalness: 0.5
+        });
+
+        // --- SHAPE GENERATOR ---
+        // Creates a Reuleaux-like triangle with variable concavity
+        function createTriLobedShape(radius, indentDepth) {
+            const shape = new THREE.Shape();
+            const segments = 120;
+            for (let i = 0; i <= segments; i++) {
+                const theta = (i / segments) * Math.PI * 2;
+                // Power of 2 creates a nice flat/smooth concavity
+                const indentAmt = Math.pow(Math.max(0, Math.cos(3 * theta)), 2);
+                const r = radius - indentDepth * indentAmt;
+                const x = r * Math.cos(theta);
+                const y = r * Math.sin(theta);
+                if (i === 0) shape.moveTo(x, y);
+                else shape.lineTo(x, y);
+            }
+            return shape;
+        }
+
+        const extrudeSettings = { bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.02, bevelThickness: 0.02 };
+
+        // --- GEOMETRY CONSTRUCTION ---
+
+        // 1. Anti-slip Floor
+        const floorGeo = new THREE.PlaneGeometry(20, 20);
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        const grid = new THREE.GridHelper(20, 40, 0x000000, 0x000000);
+        grid.position.y = 0.01;
+        grid.material.opacity = 0.3;
+        grid.material.transparent = true;
+        scene.add(grid);
+
+        // 2. Lower Cabinet (The tall waist-high base)
+        const baseShape = createTriLobedShape(0.6, 0.05); // Smooth triangle
+        const baseGeo = new THREE.ExtrudeGeometry(baseShape, { ...extrudeSettings, depth: 0.9 });
+        const baseMesh = new THREE.Mesh(baseGeo, cabinetMat);
+        baseMesh.rotation.x = -Math.PI / 2;
+        baseMesh.position.y = 0; // Extrudes from 0 up to 0.9
+        baseMesh.castShadow = true;
+        baseMesh.receiveShadow = true;
+        scene.add(baseMesh);
+
+        // 3. Dispensing Bay (Deeply indented middle section)
+        const midShape = createTriLobedShape(0.6, 0.35); // Deep indent for bottles
+        const midGeo = new THREE.ExtrudeGeometry(midShape, { ...extrudeSettings, depth: 0.5 });
+        const midMesh = new THREE.Mesh(midGeo, innerWallMat);
+        midMesh.rotation.x = -Math.PI / 2;
+        midMesh.position.y = 0.9; // Sits on top of base, goes to 1.4
+        midMesh.castShadow = true;
+        midMesh.receiveShadow = true;
+        scene.add(midMesh);
+
+        // 4. Top Shell (Frosted glass covering the tank)
+        const topShape = createTriLobedShape(0.6, 0.05); // Smooth triangle again
+        const topGeo = new THREE.ExtrudeGeometry(topShape, { ...extrudeSettings, depth: 0.4 });
+        const topMesh = new THREE.Mesh(topGeo, glassMat);
+        topMesh.rotation.x = -Math.PI / 2;
+        topMesh.position.y = 1.4; // Extrudes from 1.4 to 1.8
+        topMesh.castShadow = true;
+        scene.add(topMesh);
+
+        // Top Cap
+        const capGeo = new THREE.ExtrudeGeometry(baseShape, { ...extrudeSettings, depth: 0.05 });
+        const capMesh = new THREE.Mesh(capGeo, cabinetMat);
+        capMesh.rotation.x = -Math.PI / 2;
+        capMesh.position.y = 1.8;
+        scene.add(capMesh);
+
+        // 5. Dynamic Water Tank (Inside top shell)
+        // Set geometry anchor to bottom so scaling Y changes level properly
+        const tankRadius = 0.45;
+        const tankHeight = 0.36;
+        const waterGeo = new THREE.CylinderGeometry(tankRadius, tankRadius, tankHeight, 32);
+        waterGeo.translate(0, tankHeight / 2, 0); 
+        
+        const waterLevelMesh = new THREE.Mesh(waterGeo, waterMat);
+        waterLevelMesh.position.set(0, 1.42, 0); // Bottom of the inside of the tank
+        scene.add(waterLevelMesh);
+
+        // Ambient base glow
+        const glowGeo = new THREE.CylinderGeometry(0.62, 0.62, 0.02, 32);
+        const glowMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.3 });
+        const glowRing = new THREE.Mesh(glowGeo, glowMat);
+        glowRing.position.y = 0.02;
+        scene.add(glowRing);
+
+        // --- STATIONS, TAPS & BOTTLES ---
+        
+        const interactableButtons = [];
+        const waterStreams = [];
+        const bottles = [];
+        const stationLights = [];
+        const tapStates = [false, false, false]; 
+        
+        // Exact 3D angles that align with our custom Shape indents
+        const tapAngles = [0, 2 * Math.PI / 3, 4 * Math.PI / 3];
+
+        // Reusable bottle geometry
+        function createBottleMesh() {
+            const group = new THREE.Group();
+            const bodyGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.16, 16);
+            const neckGeo = new THREE.CylinderGeometry(0.015, 0.035, 0.06, 16);
+            neckGeo.translate(0, 0.11, 0);
+            
+            const bMat = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff, transmission: 0.95, opacity: 1, transparent: true,
+                metalness: 0.1, roughness: 0.05, ior: 1.5,
+            });
+            
+            const body = new THREE.Mesh(bodyGeo, bMat);
+            const neck = new THREE.Mesh(neckGeo, bMat);
+            body.position.y = 0.08; // Rest on bottom
+            neck.position.y = 0.08;
+            group.add(body, neck);
+            
+            group.visible = false; // Hidden initially
+            return group;
+        }
+
+        tapAngles.forEach((angle, index) => {
+            const station = new THREE.Group();
+            const dirX = Math.cos(angle);
+            const dirZ = Math.sin(angle);
+            
+            // Distances out from center
+            const trayRadius = 0.42; 
+            const tapRadius = 0.38;
+
+            // 1. Drip Tray / Grate (Waist high!)
+            const grateGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.02, 16);
+            const grate = new THREE.Mesh(grateGeo, metalMat);
+            grate.position.set(trayRadius * dirX, 0.91, trayRadius * dirZ);
+            station.add(grate);
+
+            // 2. The Tap (Under the overhang)
+            const pipeGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.1);
+            const pipe = new THREE.Mesh(pipeGeo, metalMat);
+            pipe.rotation.z = Math.PI / 2;
+            pipe.position.set((tapRadius - 0.05) * dirX, 1.35, (tapRadius - 0.05) * dirZ);
+            pipe.lookAt(new THREE.Vector3(2 * dirX, 1.35, 2 * dirZ));
+            station.add(pipe);
+
+            const spoutGeo = new THREE.CylinderGeometry(0.018, 0.012, 0.06);
+            const spout = new THREE.Mesh(spoutGeo, metalMat);
+            spout.position.set(tapRadius * dirX, 1.32, tapRadius * dirZ);
+            station.add(spout);
+
+            // 3. Interactive Touch Button (On the overhang lip)
+            const btnGeo = new THREE.BoxGeometry(0.08, 0.04, 0.06);
+            const btn = new THREE.Mesh(btnGeo, buttonIdleMat.clone()); // Clone so they can glow independently
+            const btnDist = 0.52;
+            btn.position.set(btnDist * dirX, 1.42, btnDist * dirZ);
+            btn.lookAt(new THREE.Vector3(2 * dirX, 1.42, 2 * dirZ));
+            btn.userData = { isButton: true, index: index };
+            interactableButtons.push(btn);
+            station.add(btn);
+
+            // 4. Interactive Bottle
+            const bottle = createBottleMesh();
+            bottle.position.set(trayRadius * dirX, 0.92, trayRadius * dirZ);
+            bottles.push(bottle);
+            station.add(bottle);
+
+            // 5. Water Stream
+            const streamLen = 1.32 - 0.92; // Distance from spout to tray
+            const streamGeo = new THREE.CylinderGeometry(0.005, 0.005, streamLen);
+            streamGeo.translate(0, -streamLen / 2, 0); // Anchor to top
+            
+            const stream = new THREE.Mesh(streamGeo, streamMat.clone());
+            stream.position.set(tapRadius * dirX, 1.32, tapRadius * dirZ);
+            stream.scale.y = 0.001;
+            waterStreams.push(stream);
+            station.add(stream);
+
+            // 6. Station Light (illuminates when active)
+            const light = new THREE.PointLight(0x38bdf8, 0, 1.5);
+            light.position.set(tapRadius * dirX, 1.1, tapRadius * dirZ);
+            stationLights.push(light);
+            station.add(light);
+
+            scene.add(station);
+        });
+
+        // --- INTERACTION & LOGIC ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        
+        let waterFillLevel = 1.0; // 100%
+        let tankBarUI = document.getElementById('tank-bar');
+        let tankTextUI = document.getElementById('tank-percent');
+        let activeTapsUI = document.getElementById('active-taps-ui');
+
+        function updateUI() {
+            const activeCount = tapStates.filter(Boolean).length;
+            activeTapsUI.innerText = `${activeCount} / 3`;
+            
+            const percent = Math.max(0, Math.floor(waterFillLevel * 100));
+            tankTextUI.innerText = `${percent}%`;
+            tankBarUI.style.width = `${percent}%`;
+            
+            // Color warnings based on level
+            if (percent < 15) {
+                tankBarUI.style.backgroundColor = '#ef4444'; // Red
+                tankTextUI.style.color = '#ef4444';
+            } else if (percent < 50) {
+                tankBarUI.style.backgroundColor = '#f59e0b'; // Orange
+                tankTextUI.style.color = '#f59e0b';
+            } else {
+                tankBarUI.style.backgroundColor = '#38bdf8'; // Blue
+                tankTextUI.style.color = '#f8fafc';
+            }
+        }
+
+        window.forceRefill = function() {
+            waterFillLevel = 1.0;
+            updateUI();
+        };
+
+        function toggleWater(index, forceOff = false) {
+            if (forceOff) {
+                tapStates[index] = false;
+            } else {
+                // Don't turn on if tank is empty
+                if (!tapStates[index] && waterFillLevel <= 0.01) return;
+                tapStates[index] = !tapStates[index];
+            }
+            
+            const isActive = tapStates[index];
+            
+            interactableButtons[index].material = isActive ? buttonActiveMat : buttonIdleMat;
+            bottles[index].visible = isActive;
+            stationLights[index].intensity = isActive ? 0.8 : 0;
+            
+            if (isActive) {
+                waterStreams[index].material.opacity = 0.8;
+                animateStream(waterStreams[index], true);
+            } else {
+                animateStream(waterStreams[index], false);
+            }
+            updateUI();
+        }
+
+        function animateStream(mesh, turningOn) {
+            const targetScale = turningOn ? 1.0 : 0.001;
+            const startScale = mesh.scale.y;
+            const duration = 200; 
+            const startTime = performance.now();
+
+            function update(time) {
+                const elapsed = time - startTime;
+                const progress = Math.min(elapsed / duration, 1.0);
+                const ease = turningOn ? 1 - Math.pow(1 - progress, 3) : progress * progress * progress;
+                
+                mesh.scale.y = startScale + (targetScale - startScale) * ease;
+
+                if (progress < 1.0) requestAnimationFrame(update);
+                else if (!turningOn) mesh.material.opacity = 0;
+            }
+            requestAnimationFrame(update);
+        }
+
+        // Mouse Handlers
+        window.addEventListener('pointermove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(interactableButtons);
+            document.body.style.cursor = intersects.length > 0 ? 'pointer' : 'default';
+        });
+
+        window.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(interactableButtons);
+            if (intersects.length > 0) {
+                toggleWater(intersects[0].object.userData.index);
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
+            const activeCount = tapStates.filter(Boolean).length;
+
+            // Tank Level Logic
+            if (activeCount > 0) {
+                // Drain tank (approx 8 seconds to empty entirely if all 3 taps open)
+                waterFillLevel -= (activeCount * 0.04) * delta;
+                
+                // Auto shut-off if empty
+                if (waterFillLevel <= 0) {
+                    waterFillLevel = 0;
+                    tapStates.forEach((state, i) => { if(state) toggleWater(i, true); });
+                }
+            } else if (waterFillLevel < 1.0) {
+                // Slow automatic recovery when idle
+                waterFillLevel += 0.02 * delta;
+                if (waterFillLevel > 1.0) waterFillLevel = 1.0;
+            }
+            
+            // Update physical water mesh
+            waterLevelMesh.scale.y = Math.max(0.001, waterFillLevel);
+            // Slight color pulse based on fullness
+            if(waterFillLevel > 0) {
+                waterLevelMesh.material.emissiveIntensity = 0.3 + Math.sin(time * 2) * 0.1;
+            }
+
+            // Stream and Bottle animations
+            tapStates.forEach((isActive, index) => {
+                if (isActive) {
+                    // Pulsing water flow
+                    waterStreams[index].material.opacity = 0.6 + Math.sin(time * 25) * 0.2;
+                    // Bottle slowly fills up (visual trick: scale inner blue cylinder if we added one, 
+                    // or just bob slightly)
+                    bottles[index].position.y = 0.92 + Math.sin(time * 10) * 0.002;
+                }
+            });
+
+            // Occasional UI updates so it isn't jittery
+            if (Math.floor(time * 10) % 2 === 0) updateUI();
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+    </script>
+</body>
+</html>
